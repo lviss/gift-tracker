@@ -23,10 +23,17 @@ passport.use(new Strategy({
     // be associated with a user record in the application's database, which
     // allows for account linking and authentication with other identity
     // providers.
-    console.log(profile);
-    var user = new User({ displayName: profile.displayName, google_id: profile.id, photos: profile.photos });
-    user.save();
-    return cb(null, profile);
+    //console.log(profile);
+    User.findOne({ google_id: profile.id }).populate('friends').exec(function(err, user) {
+      if (!user) {
+        user = new User({ displayName: profile.displayName, google_id: profile.id, photos: profile.photos });
+        user.save(function(user) {
+          return cb(err, user);
+        });
+      } else {
+        return cb(err, user);
+      }
+    });
   }));
 
 
@@ -71,7 +78,13 @@ app.use(passport.session());
 // Define routes.
 app.get('/',
   function(req, res) {
-    res.render('home', { user: req.user });
+    if (req.user) {
+      User.findOne({ _id: req.user._id }).populate('friends').exec(function(err, user) {
+        res.render('home', { user: user });
+      });
+    } else {
+      res.render('home', { user: req.user });
+    }
   });
 
 app.get('/login',
@@ -88,12 +101,58 @@ app.get('/login/google/return',
     res.redirect('/');
   });
 
-app.get('/profile',
+app.post('/gifts',
   require('connect-ensure-login').ensureLoggedIn(),
   function(req, res){
-    res.render('profile', { user: req.user });
+    var gift = new Gift({ description: req.body.description, url: req.body.url });
+    var user = User.findOne({ _id: req.user._id }, function(err, user) {
+      if (err)
+        return next(err);
+      if (!user)
+        return res.status(500).send({status:500, message: 'No such user', type:'internal'});
+      user.gifts.push(gift);
+      user.save(function(err) {
+        if (err)
+          return next(err);
+        res.redirect('/');
+      });
+    });
   });
 
+app.post('/friends',
+  require('connect-ensure-login').ensureLoggedIn(),
+  function(req, res){
+    User.findOne({ google_id: req.body.google_id }, function(err, friend) {
+      if (err)
+        return res.send(err);
+      if (!friend)
+        return res.status(500).send({status:500, message: 'No such friend', type:'internal'});
+      User.findOne({ _id: req.user._id }, function(err, user) {
+        if (err)
+          return res.send(err);
+        if (!user)
+          return res.status(500).send({status:500, message: 'No such user', type:'internal'});
+        user.friends.push(friend);
+        user.save(function(err) {
+          if (err)
+            return next(err);
+          res.redirect('/');
+        });
+      });
+    });
+  });
+
+app.get('/friends/:google_id', 
+  require('connect-ensure-login').ensureLoggedIn(),
+  function(req, res){
+    User.findOne({ google_id: req.params.google_id }, function(err, user) {
+      if (err)
+        return res.send(err);
+      if (!user)
+        return res.status(500).send({status:500, message: 'No such user', type:'internal'});
+      res.render('friend', { friend: user });
+    });
+  });
 // set up database
 var mongoose = require('mongoose');
 mongoose.connect(config.mongodb.connectionstring);
@@ -105,10 +164,21 @@ db.once('open', function() {
   console.log('Connected to database');
 });
 
+var giftSchema = mongoose.Schema({
+  description: String,
+  url: String,
+  completedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+  completedDate: Date
+},{ timestamps: true });
+var Gift = mongoose.model('Gift', giftSchema);
+
 var userSchema = mongoose.Schema({
-    displayName: String,
-    google_id: String,
-    photos: [mongoose.Schema.Types.Mixed]
-});
+  displayName: String,
+  google_id: { type: String, index: true },
+  photos: [mongoose.Schema.Types.Mixed],
+  gifts: [giftSchema],
+  friends: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }]
+},{ timestamps: true });
 var User = mongoose.model('User', userSchema);
+
 app.listen(config.web.port);

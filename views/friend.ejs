@@ -1,0 +1,6 @@
+  <h2>Gifts <%= friend.displayName %> wants</h2>
+  <ul>
+  <% for(var i=0; i< friend.gifts.length; i++) { %>
+    <li><%= friend.gifts[i].description %></li>
+  <% } %>
+  </ul>

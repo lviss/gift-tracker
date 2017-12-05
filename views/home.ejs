@@ -1,5 +1,36 @@
 <% if (!user) { %>
 	<p>Welcome! Please <a href="/login">log in</a>.</p>
 <% } else { %>
-	<p>Hello, <%= user.displayName %>. View your <a href="/profile">profile</a>.</p>
+	<p>Hello, <%= user.displayName %>. <img src="<%= user.photos[0].value %>" /></p>
+  <h2>Add a gift I want</h2>
+  <form action="/gifts" method="post">
+    <label for="description">Description</label>
+    <input type="text" id="description" name="description">
+    <label for="url">URL</label>
+    <input type="text" id="url" name="url">
+    <input type="submit" value="Add">
+  </form>
+  <h2>Add a friend</h2>
+  <form action="/friends" method="post">
+    <label for="google_id">Google ID</label>
+    <input type="text" id="google_id" name="google_id">
+    <input type="submit" value="Add">
+  </form>
+  <h2>Gifts I want</h2>
+  <ul>
+  <% for(var i=0; i< user.gifts.length; i++) { %>
+    <li><%= user.gifts[i].description %></li>
+  <% } %>
+  </ul>
+  <h2>Friends</h2>
+  <ul>
+  <% for(var i=0; i< user.friends.length; i++) { %>
+    <li>
+      <a href="/friends/<%= user.friends[i].google_id %>">
+        <img src="<%= user.friends[i].photos[0].value %>" />
+        <%= user.friends[i].displayName %>
+      </a>
+    </li>
+  <% } %>
+  </ul>
 <% } %>
