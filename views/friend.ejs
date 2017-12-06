@@ -1,6 +1,16 @@
   <h2>Gifts <%= friend.displayName %> wants</h2>
   <ul>
   <% for(var i=0; i< friend.gifts.length; i++) { %>
-    <li><%= friend.gifts[i].description %></li>
+    <li>
+      <%= friend.gifts[i].description %>
+      <% if(friend.gifts[i].completed) { %>
+        Already reserved!
+      <% } else { %>
+        <form method="post" action="/friends/<%= friend.google_id %>/gifts/<%= friend.gifts[i]._id %>"><input type="submit" value="Reserve" /></form>
+      <% } %>
+      <% if(friend.gifts[i].url) { %>
+        <ul><li><a href="<%= friend.gifts[i].url %>">Link</a></li></ul>
+      <% } %>
+    </li>
   <% } %>
   </ul>

@@ -1,6 +1,8 @@
 var express = require('express');
 var passport = require('passport');
 var Strategy = require('passport-google-oauth20').Strategy;
+var JwtStrategy = require('passport-jwt').Strategy
+var jwt = require('jsonwebtoken');
 
 var config = require('./config');
 
@@ -14,15 +16,10 @@ var config = require('./config');
 passport.use(new Strategy({
     clientID: config.google_auth.clientID,
     clientSecret: config.google_auth.clientSecret,
-    callbackURL: '/login/google/return',
-    returnURL: '/login/google/return'
+    callbackURL: config.google_auth.returnURL
   },
   function(accessToken, refreshToken, profile, cb) {
-    // In this example, the user's Google profile is supplied as the user
-    // record.  In a production-quality application, the Google profile should
-    // be associated with a user record in the application's database, which
-    // allows for account linking and authentication with other identity
-    // providers.
+    // Look up the user info in the database and return that
     //console.log(profile);
     User.findOne({ google_id: profile.id }).populate('friends').exec(function(err, user) {
       if (!user) {
@@ -36,23 +33,21 @@ passport.use(new Strategy({
     });
   }));
 
-
-// Configure Passport authenticated session persistence.
-//
-// In order to restore authentication state across HTTP requests, Passport needs
-// to serialize users into and deserialize users out of the session.  In a
-// production-quality application, this would typically be as simple as
-// supplying the user ID when serializing, and querying the user record by ID
-// from the database when deserializing.  However, due to the fact that this
-// example does not have a database, the complete Google profile is serialized
-// and deserialized.
-passport.serializeUser(function(user, cb) {
-  cb(null, user);
-});
-
-passport.deserializeUser(function(obj, cb) {
-  cb(null, obj);
-});
+// Configure the JWT strategy for passport, for after we've authenticated with Google
+var opts = {
+  jwtFromRequest: function(req) {
+    var token = null;
+    if (req && req.cookies)
+    {
+        token = req.cookies['jwt'];
+    }
+    return token;
+  },
+  secretOrKey: config.jwtSecret
+};
+passport.use(new JwtStrategy(opts, function(jwt_payload, done) {
+  done(null, jwt_payload);
+}));
 
 
 // Create a new Express application.
@@ -62,21 +57,39 @@ var app = express();
 app.set('views', __dirname + '/views');
 app.set('view engine', 'ejs');
 
-// Use application-level middleware for common functionality, including
-// logging, parsing, and session handling.
+// Use application-level middleware for common functionality, including logging, parsing.
 app.use(require('morgan')('combined'));
 app.use(require('cookie-parser')());
 app.use(require('body-parser').urlencoded({ extended: true }));
-app.use(require('express-session')({ secret: config.express.session.secret, resave: true, saveUninitialized: true }));
 
-// Initialize Passport and restore authentication state, if any, from the
-// session.
 app.use(passport.initialize());
-app.use(passport.session());
-
 
 // Define routes.
 app.get('/',
+  function(req, res) {
+    res.render('index', {});
+  });
+
+app.get('/login',
+  function(req, res){
+    res.render('login');
+  });
+
+app.get('/login/google',
+  passport.authenticate('google', { scope: ['profile'], session: false }));
+
+app.get('/login/google/return', 
+  passport.authenticate('google', { failureRedirect: '/login', session: false }),
+  function(req, res) {
+    var token = jwt.sign({ displayName: req.user.displayName, google_id: req.user.google_id, _id: req.user._id }, opts.secretOrKey, {
+      expiresIn: 604800 // 1 week in seconds
+    });
+    res.cookie('jwt', token, { maxAge: 604800000, httpOnly: true });
+    res.redirect('/home');
+  });
+
+app.get('/home',
+  passport.authenticate('jwt', { session: false, failureRedirect: '/login/google' }),
   function(req, res) {
     if (req.user) {
       User.findOne({ _id: req.user._id }).populate('friends').exec(function(err, user) {
@@ -87,24 +100,10 @@ app.get('/',
     }
   });
 
-app.get('/login',
-  function(req, res){
-    res.render('login');
-  });
-
-app.get('/login/google',
-  passport.authenticate('google', { scope: ['profile'] }));
-
-app.get('/login/google/return', 
-  passport.authenticate('google', { failureRedirect: '/login' }),
-  function(req, res) {
-    res.redirect('/');
-  });
-
 app.post('/gifts',
-  require('connect-ensure-login').ensureLoggedIn(),
+  passport.authenticate('jwt', { session: false, failureRedirect: '/login/google' }),
   function(req, res){
-    var gift = new Gift({ description: req.body.description, url: req.body.url });
+    var gift = new Gift({ description: req.body.description, url: req.body.url, completed: false });
     var user = User.findOne({ _id: req.user._id }, function(err, user) {
       if (err)
         return next(err);
@@ -114,13 +113,13 @@ app.post('/gifts',
       user.save(function(err) {
         if (err)
           return next(err);
-        res.redirect('/');
+        res.redirect('/home');
       });
     });
   });
 
 app.post('/friends',
-  require('connect-ensure-login').ensureLoggedIn(),
+  passport.authenticate('jwt', { session: false, failureRedirect: '/login/google' }),
   function(req, res){
     User.findOne({ google_id: req.body.google_id }, function(err, friend) {
       if (err)
@@ -136,14 +135,14 @@ app.post('/friends',
         user.save(function(err) {
           if (err)
             return next(err);
-          res.redirect('/');
+          res.redirect('/home');
         });
       });
     });
   });
 
 app.get('/friends/:google_id', 
-  require('connect-ensure-login').ensureLoggedIn(),
+  passport.authenticate('jwt', { session: false, failureRedirect: '/login/google' }),
   function(req, res){
     User.findOne({ google_id: req.params.google_id }, function(err, user) {
       if (err)
@@ -153,6 +152,29 @@ app.get('/friends/:google_id',
       res.render('friend', { friend: user });
     });
   });
+
+// this is a "post" because html doesn't let you do "put"s. This endpoint just updates the gift 
+// to be claimed by whoever is logged in.
+app.post('/friends/:friend_id/gifts/:gift_id',
+  passport.authenticate('jwt', { session: false, failureRedirect: '/login/google' }),
+  function(req, res){
+    User.findOne({ google_id: req.params.friend_id }, function(err, user) {
+      if (err)
+        return next(err);
+      if (!user)
+        return res.status(500).send({status:500, message: 'No such user', type:'internal'});
+      var gift = user.gifts.id(req.params.gift_id);
+      gift.completed = true;
+      gift.completedBy = req.user._id;
+      gift.completedDate = new Date();
+      user.save(function(err) {
+        if (err)
+          return next(err);
+        res.redirect('/friends/'+req.params.friend_id);
+      });
+    });
+  });
+
 // set up database
 var mongoose = require('mongoose');
 mongoose.connect(config.mongodb.connectionstring);
@@ -167,6 +189,7 @@ db.once('open', function() {
 var giftSchema = mongoose.Schema({
   description: String,
   url: String,
+  completed: Boolean,
   completedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
   completedDate: Date
 },{ timestamps: true });
