@@ -9,7 +9,7 @@
         <form method="post" action="/friends/<%= friend.google_id %>/gifts/<%= friend.gifts[i]._id %>"><input type="submit" value="Reserve" /></form>
       <% } %>
       <% if(friend.gifts[i].url) { %>
-        <ul><li><a href="<%= friend.gifts[i].url %>">Link</a></li></ul>
+        <ul><li><a href="<%= friend.gifts[i].url %>" target="_blank">Link</a></li></ul>
       <% } %>
     </li>
   <% } %>
