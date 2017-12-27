@@ -24,7 +24,7 @@ passport.use(new Strategy({
     User.findOne({ google_id: profile.id }).populate('friends').exec(function(err, user) {
       if (!user) {
         user = new User({ displayName: profile.displayName, google_id: profile.id, photos: profile.photos });
-        user.save(function(user) {
+        user.save(function(err) {
           return cb(err, user);
         });
       } else {
