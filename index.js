@@ -121,6 +121,10 @@ app.post('/gifts',
 app.post('/friends',
   passport.authenticate('jwt', { session: false, failureRedirect: '/login/google' }),
   function(req, res){
+    // don't allow adding yourself as a friend
+    if (req.body.google_id == req.user.google_id) {
+      return res.status(500).send({status:500, message: 'You can\'t add yourself as a friend', type:'internal'});
+    }
     User.findOne({ google_id: req.body.google_id }, function(err, friend) {
       if (err)
         return res.send(err);
